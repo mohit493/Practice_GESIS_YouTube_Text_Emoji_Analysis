@@ -1,0 +1,348 @@
+---
+title: "Practice_GESIS Workshop"
+author: "Mohit"
+output: html_document
+---
+
+# Overview
+
+This is a notebook based on the GESIS Workshop: Automatic Sampling and Analysis of Youtube data [21st - 22nd Feburary 2022]. The goal is practice the whole workshop exercises.
+
+Dataset: Youtube API
+Language: R (v4.1.3)
+
+ <b> Key Objectives: </b>
+<li> Using Youtube API </li>
+<li> Preprocessing of data for analysis </li>
+<li> Basic sentiment analysis </li>
+
+**Note:** Please check the licences of the packages before using forward and parent repository. <br>
+Link to the main repository: https://github.com/jobreu/youtube-workshop-gesis-2022
+
+
+```{r- Libraries}
+#List of libraries used in this practice analysis.
+library(vosonSML)
+library(dplyr)
+library(lubridate)
+library(qdapRegex)
+library(remotes)
+library(emoji)
+library(emo)
+library(ggplot2)
+library(quanteda)
+library(quanteda.textstats)
+library(tidyverse)
+library(sentimentr)
+library(anytime)
+library(knitr)
+```
+
+## Using Youtube API
+
+Firstly we try to have a handshake with the API. For this step few things to consider:
+<li> Some packages might redirect to a browser for OAUTH and some IDEs are not feasible for this. Try using other package for Youtube API. </li>
+<li>Be mindful of the 'API costs' different calls have a cost attached and then you could view it in the Console. Note: It might not be 1:1 cost, rather it is depending on the method/function used. </li>
+
+ <br> Here the package used is <b>VosonSML</b>
+
+```{r-AuthenticationYoutubeAPI}
+youtube_auth = Authenticate("youtube",apiKey = key)
+```
+***
+Once the authentication is done, we download the comments for a particular video. Note that comment and replies are different which can be differentiated from the comment ID.
+```{r-RawData}
+videoIDs <- GetYoutubeVideoIDs(videoUrl)
+RawData <- youtube_auth %>% Collect(videoIDs = videoIDs, writeToFile = FALSE, verbose = FALSE, maxComments = 300)
+```
+***
+Saving data to a data file without processing.
+```{r-SavingRawData}
+#Path for saving the comments as a RAW data.
+
+path <- paste(substring(basePath, first = 1), substring('/data/PracticeRawData.rds',first = 1), sep = "")
+
+saveRDS(RawData,path)
+```
+
+***
+```{r-ReadingRawData}
+Data <- readRDS(path)
+```
+
+***
+Practice: Let's try to find the comment with most replies
+```{r-Practice_MostReplies}
+
+Data <- as.data.frame(Data)
+
+ReplyCount <- Data %>% group_by(ParentID) %>% summarise(n=n())
+ReplyCount$n <- as.numeric(ReplyCount$n)
+MostComments <- ReplyCount %>% arrange(desc(ReplyCount$n))
+
+head(MostComments)
+
+#The first entry is the NA, ie comments with no reply, there we go for the second row.
+CommentsMostReply <- Data %>% filter(ParentID == as.character(MostComments[2,1]))
+CommentsMostReply
+
+```
+
+## Data Pre-Processing
+
+Following steps are being undertaken:
+<li> Selecting columns. </li>
+<li> Converting formats and timestamp. </li>
+<li> Removing URLs from the Comments and then storing in a different column. </li>
+
+```{r - ProcessingDataSet}
+selection <- Data %>% select(-c("AuthorDisplayName", "AuthorProfileImageUrl", "AuthorChannelUrl","AuthorChannelID"))
+selection$PublishedAt <- anytime(selection$PublishedAt)
+#ProcessedComments$PublishedAt <- ymd_hms(ProcessedComments$PublishedAt)
+#ProcessedComments$UpdatedAt <- ymd_hms(ProcessedComments$UpdatedAt)
+selection$UpdatedAt <- ymd_hms(selection$UpdatedAt)
+selection$ReplyCount <- as.numeric(selection$ReplyCount)
+selection$LikeCount <- as.numeric(selection$LikeCount)
+selection$LinkDel <- rm_url(selection$Comment) #From one of the packages, maybe Tuber
+selection$Link <- rm_url(selection$Comment, extract = TRUE)
+
+```
+
+***
+Creating an Emoji Dictionary and arranging them in a order with a length max to small for string comparison. We are using the **emojis** package.
+
+```{r-EmojiDict}
+
+emojis <- as.data.frame(emoji::emojis)
+selection$Emojis <- emoji_extract_all(selection$LinkDel)
+
+#We also want to arrange the Emoji dictionary in a way that it would be from longest to smallest, so that the string matches are right.
+
+emojiDict <- emojis %>% arrange(desc(nchar(emojis$runes)))
+EmojiDict <- emojiDict %>% select(c("runes", "emoji","name"))
+```
+
+***
+Loading scripts and then:
+* Remove emojis from the text (Comments - URL and Emojis)
+* Convert Emojis to their text names
+* Have a text column with the emoji names
+
+```{r - LoadingScriptsAndApplying}
+
+#source(c(ExtractEmoji))
+source(ScriptPath)
+
+#Changing the Emoji dict names in upper cases.
+CamelCaseEmojis <- lapply(EmojiDict$name, simpleCap)
+CollapsedEmojis <- lapply(CamelCaseEmojis, function(x){gsub(" ","",x,fixed = TRUE)})
+
+EmojiDict[,4] <- unlist(CollapsedEmojis)
+#head(EmojiList)
+
+```
+
+***
+Replacing Emojis in the text with their names from the dictionary.
+```{r - ReplacingEmojiWithText}
+TextEmoRep <- selection$LinkDel
+
+for(i in 1:dim(EmojiDict)[1]){
+  TextEmoRep<- rm_default(TextEmoRep,
+                              pattern = EmojiDict[i,2],
+                              replacement = paste0("EMOJI_",EmojiDict[i,4], " "),
+                                fixed = TRUE, clean = FALSE, trim = FALSE)
+}
+
+#Naming the extracted emojis
+
+EmojisNamed <- selection$Emojis
+
+for(i in 1:dim(EmojiDict)[1]){
+  EmojisNamed<- rm_default(EmojisNamed,
+                          pattern = EmojiDict[i,2],
+                          replacement = paste0("EMOJI_",EmojiDict[i,4], " "),
+                          fixed = TRUE, clean = FALSE, trim = FALSE)
+}
+
+TextEmoDel <- emoji_replace_all(selection$LinkDel,"")
+
+```
+
+***
+Combining the data frame columns.
+```{r - ProcessedDataFrame}
+
+ProcessedComments <- cbind.data.frame(
+                           selection$PublishedAt,
+                           selection$ParentID,
+                           selection$CommentID,
+                           selection$Comment,
+                           TextEmoRep,
+                           TextEmoDel,
+                           EmojisNamed,
+                           Emoji = I(selection$Emojis),
+                           stringsAsFactors = FALSE
+)
+
+
+names(ProcessedComments) <- c("PublishedAt",
+                              "ParentComment",
+                              "CommentId",
+                              "Comment",
+                              "TextEmojiReplaced",
+                              "TextEmojiDeleted",
+                              "EmojiName",
+                              "Emoji")
+
+pathProcessed <- paste(substring(basePath, first = 1), substring('/PracticeWrangledComments.rds',first = 1), sep = "")
+
+saveRDS(ProcessedComments,pathProcessed)
+```
+
+
+***
+
+Read the Processed Comments back in the file.
+
+```{r-LoadingProcessedDataFrame}
+
+CommentsP <- readRDS(pathProcessed)
+
+```
+
+
+```{r-CommentsTimewise}
+#We are trying to find the number of comments as the time of publishing.
+
+CommentsP$Date <- as.Date(CommentsP$PublishedAt)
+CommentsP <- CommentsP %>% arrange(CommentsP$Date)
+
+head(CommentsP)
+```
+
+***
+Practice: Number of comments on a day.
+```{r-PracticeCommentsRepliesPerDay}
+CommentCount <- CommentsP %>% group_by(CommentsP$Date) %>% count((CommentsP$Date))
+
+names(CommentCount) <- c('Date','Date2','n')
+colnames(CommentCount)
+
+#This is comments and replies, hence this would be the activity as a whole.
+g <- ggplot(CommentCount,aes(x = CommentCount$Date, y = CommentCount$n))
+g <- g + geom_line(colour = 'green', linetype = 'dashed')
+
+plot(g)
+
+
+```
+
+## Text Analysis
+
+Here we are using the **BagOfWords** approach and for this we have to create tokens. For this particular practice we are using the 1gram (each word.)
+
+```{r- CreatingWordTokens}
+
+#This is tokenising the each comment, which is a document? where each word is a token.
+toks <- CommentsP %>%
+        pull(TextEmojiDeleted) %>%
+        char_tolower() %>%
+        tokens(remove_numbers = TRUE,
+               remove_punct = TRUE,
+               remove_separators = TRUE,
+               remove_symbols = TRUE,
+               split_hyphens = TRUE,
+               remove_url = TRUE)
+```
+
+***
+DFM is an object type for the document feature matrix. Here for each feature i.e. we are calculating the frequency.
+```{r - CalculatingTermFrequency}
+custom_stopwords <- c("de","la")
+commentsDfm <- dfm(toks,remove = c(quanteda::stopwords("english"),custom_stopwords))
+
+TermFreq2 <- textstat_frequency(commentsDfm)
+
+TermFreq2$PerComment <- TermFreq2$frequency/TermFreq2$docfreq
+
+TermFreq2 %>% arrange(desc(TermFreq2$PerComment)) %>% filter(docfreq > 5)
+head(TermFreq2)
+
+TermFreq2 %>% head(n = 25) %>% ggplot(aes(x= frequency , y = reorder(feature, frequency), colour = "red")) + geom_bar(stat = 'identity') + geom_vline(xintercept = 10, colour = 'green')
+
+
+```
+
+***
+Here tokenising the Emojis, however it is not clean yet, as the emojis have some string components around to be removed and also the same are in different rows to look.
+
+```{r-EmojiTokens}
+
+emoji_toks <- CommentsP %>%
+        mutate(Emoji = na_if(Emoji, "character(0)")) %>% # define missings
+        mutate (Emoji = str_trim(Emoji)) %>% # remove spaces
+        filter(!is.na(Emoji)) %>% # only keep comments with emojis
+        pull(Emoji) %>% # pull out column cotaining emoji labels
+        tokens(what = "fastestword",
+               remove_numbers = TRUE,
+               remove_punct = TRUE,
+               remove_separators = TRUE,
+               remove_symbols = TRUE,
+               split_hyphens = TRUE,
+               remove_url = TRUE) # tokenize emoji labels
+
+EmojiDfm <- dfm(emoji_toks,remove = c(quanteda::stopwords("english")))
+
+```
+
+```{r- EmojiFreq}
+EmojiFreq <- textstat_frequency(EmojiDfm)
+EmojiFreq %>% arrange(desc(EmojiFreq$frequency))
+head(EmojiFreq, n = 10)
+```
+
+***
+### Sentiment Analysis
+Lets start with the sentiment analysis
+
+```{r-SentimentScore}
+
+SentimentScore <- sentiment_by(CommentsP$TextEmojiDeleted)
+
+CommentsP$Sentiment <- SentimentScore$ave_sentiment
+CommentsP$SentimentSD <- SentimentScore$sd
+CommentsP$SentimentPerWord <- SentimentScore$ave_sentiment/SentimentScore$word_count
+
+
+#lets explore the most positive or the most negative sentiment.
+
+```
+
+***
+Plotting sentiments with the days
+
+```{r-PlotSentiments}
+
+SentiDf <- cbind.data.frame(CommentsP$Date,CommentsP$Sentiment,CommentsP$Comment)
+
+names(SentiDf) <- c('Date','Sentiment','Comment')
+
+SentiDf$Sentiment <- as.numeric(SentiDf$Sentiment)
+SentiDf$Date <- as.Date(SentiDf$Date)
+
+
+SentiDay <- SentiDf %>% group_by(Date) %>% summarise(mean(Sentiment, na.rm = TRUE))
+names(SentiDay) <- c('Date','Average')
+
+head(SentiDay,20)
+dim(SentiDay)
+
+#This is comments and replies, hence this would be the activity as a whole.
+s <- ggplot(SentiDay,aes(x = SentiDay$Date, y = SentiDay$Average))
+s <- s + geom_line(colour = 'green', linetype = 'dashed')
+s <- s + geom_hline(yintercept = mean(SentiDf$Sentiment), colour = 'blue')
+
+plot(s)
+
+```
