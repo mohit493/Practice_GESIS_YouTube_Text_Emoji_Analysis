@@ -1,6 +1,11 @@
-# Practice_GESIS_YouTube_Text_Emoji_Analysis
-A practice repository based on the workshop on Youtube Comment analysis.
+# Practice_BagOfWords
 
-Link to the workshop repository: https://github.com/jobreu/youtube-workshop-gesis-2022
+A practice repository for GESIS workshop: Automatic Sampling and Analysis of Youtube Data.
 
-Please look into workshop repository for the licence.
++ Youtube api
++ Processing and cleaning user comments.
++ Basic Text and sentiment analysis of user comments.
+
+[Link to the workshop repository on github](https://github.com/jobreu/youtube-workshop-gesis-2022)
+
+Please check the licence in the **Terms of Use** in the Workshop repository.
