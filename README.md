@@ -1,6 +1,6 @@
 # Bag of words
 
-A practice repository for GESIS workshop: **Automatic Sampling and Analysis of Youtube Data.**
+A repository for GESIS workshop: **Automatic Sampling and Analysis of Youtube Data.**
 
 + Youtube api
 + Processing and cleaning user comments.
