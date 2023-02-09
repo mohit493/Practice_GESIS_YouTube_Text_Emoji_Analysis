@@ -8,4 +8,4 @@ A repository for GESIS workshop: **Automatic Sampling and Analysis of Youtube Da
 
 [Link to the workshop repository on github](https://github.com/jobreu/youtube-workshop-gesis-2022)
 
-Please check the licence in the **Terms of Use** in the Workshop repository.
+Please check the licence in the **Terms of Use** in the workshop repository.
